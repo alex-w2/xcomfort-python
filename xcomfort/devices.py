@@ -1,6 +1,7 @@
-from contextlib import nullcontext
+from typing import Optional
+
 import rx
-from .messages import Messages, ShadeOperationState
+from .constants import Messages, ShadeOperationState
 
 class DeviceState:
     def __init__(self, payload):
@@ -200,3 +201,58 @@ class Shade(BridgeDevice):
 
     def __str__(self) -> str:
         return f"<Shade device_id={self.device_id} name={self.name} state={self.state} supports_go_to={self.supports_go_to}>"
+
+
+class DoorWindowSensor(BridgeDevice):
+    def __init__(self, bridge, device_id, name, comp_id, payload):
+        BridgeDevice.__init__(self, bridge, device_id, name)
+
+        self.comp_id = comp_id
+        self.payload = payload
+        self.is_open: Optional[bool] = None
+        self.is_closed: Optional[bool] = None
+
+    def handle_state(self, payload):
+        if (state := payload.get("curstate")) is not None:
+            self.is_closed = state == 1
+            self.is_open = not self.is_closed
+
+        self.state.on_next(self.is_closed)
+
+
+class WindowSensor(DoorWindowSensor):
+    pass
+
+
+class DoorSensor(DoorWindowSensor):
+    pass
+
+
+class Rocker(BridgeDevice):
+    def __init__(self, bridge, device_id, name, comp_id, payload):
+        BridgeDevice.__init__(self, bridge, device_id, name)
+        self.comp_id = comp_id
+        self.payload = payload
+        self.is_on: bool | None = None
+        if "curstate" in payload:
+            self.is_on = bool(payload["curstate"])
+
+    @property
+    def name_with_controlled(self) -> str:
+        """Name of Rocker, with the names of controlled devices in parens."""
+        names_of_controlled: set[str] = set()
+        for device_id in self.payload.get("controlId", []):
+            device = self.bridge._devices.get(device_id)
+            if device:
+                names_of_controlled.add(device.name)
+
+        return f"{self.name} ({', '.join(sorted(names_of_controlled))})"
+
+    def handle_state(self, payload, broadcast: bool = True) -> None:
+        self.payload.update(payload)
+        self.is_on = bool(payload["curstate"])
+        if broadcast:
+            self.state.on_next(self.is_on)
+
+    def __str__(self):
+        return f'Rocker({self.device_id}, "{self.name}", is_on: {self.is_on} payload: {self.payload})'

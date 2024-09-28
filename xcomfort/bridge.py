@@ -1,17 +1,13 @@
-from unicodedata import numeric
+from typing import Optional
 import aiohttp
 import asyncio
-import string
-import time
-import rx
-import rx.operators as ops
 from enum import Enum
 from .connection import SecureBridgeConnection, setup_secure_connection
-from .messages import Messages
-from .devices import (BridgeDevice, Light, RcTouch, Heater, Shade)
-from .room import Room, RoomState, RctMode, RctState, RctModeRange
-from .comp import Comp, CompState
-
+from .constants import ComponentTypes, DeviceTypes, Messages
+from .devices import (BridgeDevice, DoorSensor, Light, RcTouch, Heater, Rocker, Shade, WindowSensor)
+# Some HA code relies on bridge having imported these:
+from .room import Room, RoomState, RctMode, RctState, RctModeRange # noqa
+from .comp import Comp, CompState # noqa
 
 class State(Enum):
     Uninitialized = 0
@@ -130,19 +126,33 @@ class Bridge:
         name = payload['name']
         dev_type = payload["devType"]
         comp_id = payload["compId"]
+        if dev_type in (DeviceTypes.ACTUATOR_SWITCH, DeviceTypes.ACTUATOR_DIMM):
+            if payload.get("usage") == 0:
+                # If usage = 1 then it's configured as a "load",
+                # and not as a light.
+                dimmable = payload["dimmable"]
+                return Light(self, device_id, name, dimmable)
 
-        if dev_type == 100 or dev_type == 101:
-            dimmable = payload['dimmable']
-            return Light(self, device_id, name, dimmable)
-
-        if dev_type == 102:
+        elif dev_type == DeviceTypes.SHADING_ACTUATOR:
             return Shade(self, device_id, name, comp_id, payload)
 
-        if dev_type == 440:
+        elif dev_type == DeviceTypes.HEATING_ACTUATOR:
             return Heater(self, device_id, name, comp_id)
 
-        if dev_type == 450:
+        elif dev_type == DeviceTypes.RC_TOUCH:
             return RcTouch(self, device_id, name, comp_id)
+
+        elif dev_type == DeviceTypes.SWITCH:
+            component: Optional[Comp] = self._comps.get(comp_id)
+            if component and component.comp_type == ComponentTypes.DOOR_WINDOW_SENSOR:
+                if component.payload.get("mode") == "1310":
+                    return DoorSensor(self, device_id, name, comp_id, payload)
+                return WindowSensor(self, device_id, name, comp_id, payload)
+
+        elif dev_type == DeviceTypes.ROCKER:
+            # What Xcomfort calls a rocker HomeAssistant (and most humans) call a
+            # switch
+            return Rocker(self, device_id, name, comp_id, payload)
 
         return BridgeDevice(self, device_id, name)
 
