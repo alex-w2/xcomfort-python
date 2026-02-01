@@ -42,6 +42,7 @@ class Bridge:
         self.connection = None
         self.connection_subscription = None
         self.logger = lambda x: None
+        self._is_bulk_loading = False  # Track bulk loading to suppress Rocker broadcasts
 
     async def run(self):
         if self.state != State.Uninitialized:
@@ -190,7 +191,11 @@ class Bridge:
 
             self._add_device(device)
 
-        device.handle_state(payload)
+        # For Rocker devices during bulk load, suppress broadcast to prevent phantom switch events
+        if isinstance(device, Rocker) and self._is_bulk_loading:
+            device.handle_state(payload, broadcast=False)
+        else:
+            device.handle_state(payload)
 
     def _handle_room_payload(self, payload):
         room_id = payload['roomId']
@@ -208,8 +213,8 @@ class Bridge:
         room.handle_state(payload)
 
     def _handle_SET_ALL_DATA(self, payload):
-        if 'lastItem' in payload:
-            self.state = State.Ready
+        # Set flag to suppress Rocker broadcasts during bulk loading
+        self._is_bulk_loading = True
 
         if 'devices' in payload:
             for device_payload in payload['devices']:
@@ -238,6 +243,12 @@ class Bridge:
                     self._handle_room_payload(room_payload)
                 except Exception as e:
                     self.logger(f"Failed to handle room payload: {str(e)}")
+
+        if 'lastItem' in payload:
+            # Clear flag after bulk loading is complete
+            self._is_bulk_loading = False
+            self.state = State.Ready
+            self.logger("Ready")
 
     def _handle_UNKNOWN(self, message_type, payload):
         self.logger(f"Unhandled package [{message_type.name}]: {payload}")

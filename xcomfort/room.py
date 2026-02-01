@@ -62,6 +62,10 @@ class Room:
         humidity = payload.get('humidity', None)
         power = payload.get('power', 0.0)
 
+        # Initialize mode and currentstate with defaults to prevent NameError
+        mode = None
+        currentstate = None
+
         if 'currentMode' in payload:                # When handling from _SET_ALL_DATA
             mode = RctMode(payload.get('currentMode', None))
         if 'mode' in payload:                       # When handling from _SET_STATE_INFO
@@ -70,8 +74,8 @@ class Room:
         # When handling from _SET_ALL_DATA, we get the setpoints for each mode/preset
         # Store these for later use
         if 'modes' in payload:
-            for mode in payload["modes"]:
-                self.modesetpoints[RctMode(mode["mode"])] = float(mode["value"])
+            for mode_item in payload["modes"]:
+                self.modesetpoints[RctMode(mode_item["mode"])] = float(mode_item["value"])
 
         if 'state' in payload:
             currentstate = RctState(payload.get('state', None))
